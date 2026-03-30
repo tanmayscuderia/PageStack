@@ -1,0 +1,23 @@
+[package]
+name = "image-pdf-app"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "image_pdf_app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[dependencies]
+anyhow = "1"
+base64 = "0.22"
+image = { version = "0.25", features = ["jpeg", "png", "webp", "tiff", "bmp"] }
+natord = "1"
+printpdf = { version = "0.9", features = ["images", "jpeg", "png", "webp", "tiff", "bmp"] }
+rayon = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
