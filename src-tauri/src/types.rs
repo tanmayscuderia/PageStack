@@ -1,12 +1,12 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AppImage {
     pub path: String,
     pub name: String,
     pub size_bytes: Option<u64>,
-    pub preview_data_url: Option<String>,
+    pub preview_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -18,7 +18,7 @@ pub enum QualityPreset {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct GenerateRequest {
     pub paths: Vec<String>,
     pub output_path: String,
@@ -26,7 +26,7 @@ pub struct GenerateRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct GenerateResult {
     pub output_path: String,
     pub output_bytes: u64,

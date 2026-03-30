@@ -1,33 +1,35 @@
-import { Fragment, useEffect, useMemo, useRef, useState, type DragEvent } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { Fragment, useEffect, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { listen } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
-import type { AppImage, GenerateResult, QualityPreset } from "./types";
+import { useImageQueue } from "./hooks/useImageQueue";
+import { useDragReorder } from "./hooks/useDragReorder";
+import { ImageCard } from "./components/ImageCard";
+import { formatAppError } from "./lib/errors";
+import { invoke } from "@tauri-apps/api/core";
+import type { GenerateResult, QualityPreset } from "./types";
 
 export default function App() {
-  const [images, setImages] = useState<AppImage[]>([]);
-  const [dragIndex, setDragIndex] = useState<number | null>(null);
-  const [dropIndex, setDropIndex] = useState<number | null>(null);
   const [preset, setPreset] = useState<QualityPreset>("balanced");
   const [outputPath, setOutputPath] = useState("");
   const [loading, setLoading] = useState(false);
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [result, setResult] = useState<GenerateResult | null>(null);
   const [error, setError] = useState("");
-  const dragIndexRef = useRef<number | null>(null);
+  const { images, totalInputBytes, loadImagesFromFolder, loadImagesFromPaths, moveDown, moveImage, moveUp, removeImage } =
+    useImageQueue();
 
-  const totalInputBytes = useMemo(
-    () => images.reduce((sum, img) => sum + (img.sizeBytes ?? 0), 0),
-    [images]
-  );
   const canGenerate = images.length > 0 && outputPath.trim().length > 0;
-  const previews = useMemo(
-    () =>
-      images.map((img) => ({
-        ...img,
-        previewUrl: img.previewDataUrl ?? ""
-      })),
-    [images]
-  );
+  const {
+    dragPath,
+    dropIndex,
+    clearDragState,
+    handleDragEnter,
+    handleDragOver,
+    handleDragStart,
+    handleDrop,
+    handleFilmstripDragOver
+  } = useDragReorder({ items: images, moveImage });
 
   useEffect(() => {
     let unlisten: (() => void) | null = null;
@@ -40,14 +42,9 @@ export default function App() {
         }
 
         try {
-          const dropped = await invoke<AppImage[]>("load_images_from_paths", {
-            paths: event.payload.paths
-          });
-          if (dropped.length) {
-            setImages((current) => mergeImages(current, dropped));
-          }
+          await loadImagesFromPaths(event.payload.paths);
         } catch (e) {
-          setError(String(e));
+          setError(formatAppError(e));
         }
       });
     };
@@ -57,7 +54,28 @@ export default function App() {
     return () => {
       unlisten?.();
     };
-  }, []);
+  }, [loadImagesFromPaths]);
+
+  useEffect(() => {
+    let unlistenProgress: (() => void) | null = null;
+
+    if (!loading) {
+      setProgress(null);
+      return undefined;
+    }
+
+    const setup = async () => {
+      unlistenProgress = await listen<[number, number]>("pdf_progress", (event) => {
+        setProgress({ done: event.payload[0], total: event.payload[1] });
+      });
+    };
+
+    void setup();
+
+    return () => {
+      unlistenProgress?.();
+    };
+  }, [loading]);
 
   async function pickFolder() {
     setError("");
@@ -69,13 +87,10 @@ export default function App() {
       });
 
       if (typeof folder === "string" && folder.length > 0) {
-        const files = await invoke<AppImage[]>("load_images_from_folder", {
-          folderPath: folder
-        });
-        setImages((current) => mergeImages(current, files));
+        await loadImagesFromFolder(folder);
       }
     } catch (e) {
-      setError(String(e));
+      setError(formatAppError(e));
     }
   }
 
@@ -91,7 +106,7 @@ export default function App() {
         setOutputPath(path);
       }
     } catch (e) {
-      setError(String(e));
+      setError(formatAppError(e));
     }
   }
 
@@ -102,6 +117,7 @@ export default function App() {
     }
 
     setLoading(true);
+    setProgress(null);
     setError("");
     setResult(null);
 
@@ -115,99 +131,10 @@ export default function App() {
       });
       setResult(res);
     } catch (e) {
-      setError(String(e));
+      setError(formatAppError(e));
     } finally {
       setLoading(false);
     }
-  }
-
-  function moveUp(index: number) {
-    if (index === 0) return;
-    const next = [...images];
-    [next[index - 1], next[index]] = [next[index], next[index - 1]];
-    setImages(next);
-  }
-
-  function moveDown(index: number) {
-    if (index === images.length - 1) return;
-    const next = [...images];
-    [next[index + 1], next[index]] = [next[index], next[index + 1]];
-    setImages(next);
-  }
-
-  function removeImage(index: number) {
-    setImages((current) => current.filter((_, imageIndex) => imageIndex !== index));
-  }
-
-  function moveImage(fromIndex: number, insertionIndex: number) {
-    setImages((current) => {
-      const next = [...current];
-      if (
-        fromIndex < 0 ||
-        fromIndex >= next.length ||
-        insertionIndex < 0 ||
-        insertionIndex > next.length
-      ) {
-        return current;
-      }
-
-      const [moved] = next.splice(fromIndex, 1);
-      const nextIndex = fromIndex < insertionIndex ? insertionIndex - 1 : insertionIndex;
-      next.splice(nextIndex, 0, moved);
-      return next;
-    });
-  }
-
-  function handleDragStart(event: DragEvent<HTMLElement>, index: number) {
-    event.dataTransfer.effectAllowed = "move";
-    event.dataTransfer.setData("text/plain", String(index));
-    setDragIndex(index);
-    dragIndexRef.current = index;
-  }
-
-  function handleDragOver(event: DragEvent<HTMLElement>, index: number) {
-    event.preventDefault();
-    event.dataTransfer.dropEffect = "move";
-    const rect = event.currentTarget.getBoundingClientRect();
-    const insertAfter = event.clientX > rect.left + rect.width / 2;
-    const insertionIndex = index + (insertAfter ? 1 : 0);
-    setDropIndex(insertionIndex);
-  }
-
-  function handleDragEnter(event: DragEvent<HTMLElement>, index: number) {
-    handleDragOver(event, index);
-  }
-
-  function handleFilmstripDragOver(event: DragEvent<HTMLElement>) {
-    if (dragIndexRef.current === null) {
-      return;
-    }
-
-    event.preventDefault();
-    event.dataTransfer.dropEffect = "move";
-    setDropIndex(images.length);
-  }
-
-  function clearDragState() {
-    setDragIndex(null);
-    setDropIndex(null);
-    dragIndexRef.current = null;
-  }
-
-  function handleDrop() {
-    const fromIndex = dragIndexRef.current;
-    const insertionIndex = dropIndex;
-
-    if (fromIndex === null || insertionIndex === null) {
-      clearDragState();
-      return;
-    }
-
-    if (insertionIndex !== fromIndex && insertionIndex !== fromIndex + 1) {
-      moveImage(fromIndex, insertionIndex);
-    }
-
-    clearDragState();
   }
 
   return (
@@ -250,8 +177,12 @@ export default function App() {
             </div>
 
             <div className="controlCluster">
-              <button type="button" className="button secondary" onClick={pickFolder}>Pick folder</button>
-              <button type="button" className="button secondary" onClick={pickOutput}>Output</button>
+              <button type="button" className="button secondary" onClick={pickFolder}>
+                Pick folder
+              </button>
+              <button type="button" className="button secondary" onClick={pickOutput}>
+                Output
+              </button>
               <label className="field inlineField">
                 <input
                   placeholder="C:\\docs\\output.pdf"
@@ -282,11 +213,19 @@ export default function App() {
           {loading && (
             <div className="loadingBar" aria-live="polite" aria-busy="true">
               <div className="loadingBarTrack">
-                <div className="loadingBarFill" />
+                <div
+                  className="loadingBarFill"
+                  style={{
+                    width: progress ? `${Math.max(4, (progress.done / progress.total) * 100)}%` : "45%",
+                    animation: progress ? "none" : undefined
+                  }}
+                />
               </div>
               <div className="loadingStatus">
                 <span className="spinner" />
-                <span>Generating PDF, please wait...</span>
+                <span>
+                  {progress ? `${progress.done} / ${progress.total} images processed` : "Generating PDF, please wait..."}
+                </span>
               </div>
             </div>
           )}
@@ -339,68 +278,26 @@ export default function App() {
               </div>
             ) : (
               <>
-                {previews.map((img, index) => (
+                {images.map((img, index) => (
                   <Fragment key={img.path}>
                     {dropIndex === index && (
                       <div className="insertionMarker" aria-hidden="true">
                         <span className="insertionMarkerLine" />
                       </div>
                     )}
-                    <article
-                      className={`imageCard ${dragIndex === index ? "isDragging" : ""}`}
-                      draggable
-                      onDragStart={(event) => handleDragStart(event, index)}
-                      onDragOver={(event) => handleDragOver(event, index)}
-                      onDragEnter={(event) => handleDragEnter(event, index)}
+                    <ImageCard
+                      image={img}
+                      index={index}
+                      isDragging={dragPath === img.path}
+                      onDragStart={handleDragStart}
+                      onDragOver={handleDragOver}
+                      onDragEnter={handleDragEnter}
                       onDrop={handleDrop}
                       onDragEnd={clearDragState}
-                    >
-                      <div className="thumb">
-                        <img src={img.previewUrl} alt={img.name} loading="lazy" />
-                      </div>
-                      <button
-                        type="button"
-                        className="dragHandle"
-                        draggable={false}
-                        aria-label={`Drag ${img.name}`}
-                      >
-                        ↔ Drag
-                      </button>
-                      <div className="cardBody">
-                        <div className="name">{img.name}</div>
-                        <div className="path">{img.path}</div>
-                        <div className="cardMeta">
-                          <span>{index + 1}</span>
-                          <span>{formatBytes(img.sizeBytes ?? 0)}</span>
-                        </div>
-                      </div>
-                      <div className="cardActions">
-                        <button
-                          type="button"
-                          className="iconButton"
-                          onClick={() => moveUp(index)}
-                          aria-label={`Move ${img.name} left`}
-                        >
-                          ←
-                        </button>
-                        <button
-                          type="button"
-                          className="iconButton"
-                          onClick={() => moveDown(index)}
-                          aria-label={`Move ${img.name} right`}
-                        >
-                          →
-                        </button>
-                        <button
-                          type="button"
-                          className="iconButton"
-                          onClick={() => removeImage(index)}
-                          aria-label={`Remove ${img.name}`}
-                        >
-                          ×
-                        </button>
-                      </div>
-                    </article>
+                      onMoveUp={moveUp}
+                      onMoveDown={moveDown}
+                      onRemove={removeImage}
+                    />
                   </Fragment>
                 ))}
                 {dropIndex === images.length && (
@@ -427,19 +324,4 @@ function formatBytes(bytes: number) {
     unitIndex += 1;
   }
   return `${value.toFixed(2)} ${units[unitIndex]}`;
-}
-
-function mergeImages(existing: AppImage[], incoming: AppImage[]) {
-  const seen = new Set(existing.map((image) => image.path));
-  const next = [...existing];
-
-  for (const image of incoming) {
-    if (seen.has(image.path)) {
-      continue;
-    }
-    seen.add(image.path);
-    next.push(image);
-  }
-
-  return next;
 }

@@ -559,12 +559,6 @@ button {
     border-radius: 16px;
   }
 
-  .actionRow,
-  .generatorRow {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
   .resultGrid {
     grid-template-columns: 1fr;
   }

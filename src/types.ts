@@ -4,7 +4,7 @@ export interface AppImage {
   path: string;
   name: string;
   sizeBytes?: number;
-  previewDataUrl?: string;
+  previewPath?: string;
 }
 
 export interface GenerateRequest {
