@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use image::codecs::jpeg::JpegEncoder;
 use image::imageops::FilterType;
 use image::{DynamicImage, GenericImageView, ImageFormat, ImageReader};
+use rayon::prelude::*;
 use tauri::Manager;
 use tracing::{info, warn};
 
@@ -58,6 +59,7 @@ pub fn generate_pdf(app: tauri::AppHandle, request: GenerateRequest) -> Result<G
 fn load_images(app: &tauri::AppHandle, paths: Vec<PathBuf>, source: &str) -> Result<Vec<AppImage>, String> {
     let mut images = Vec::new();
     let mut seen = HashSet::new();
+    let mut load_queue = Vec::new();
 
     for path in paths {
         if images.len() >= MAX_IMAGES_PER_BATCH {
@@ -77,8 +79,22 @@ fn load_images(app: &tauri::AppHandle, paths: Vec<PathBuf>, source: &str) -> Res
             continue;
         }
 
-        images.push(image_from_path(app, path).map_err(|err| err.ipc_error_string())?);
+        load_queue.push(path);
     }
+
+    if load_queue.len() > MAX_IMAGES_PER_BATCH {
+        return Err(AppError::TooManyImages {
+            count: load_queue.len(),
+            limit: MAX_IMAGES_PER_BATCH,
+        }
+        .ipc_error_string());
+    }
+
+    let app = app.clone();
+    images = load_queue
+        .into_par_iter()
+        .map(|path| image_from_path(&app, path).map_err(|err| err.ipc_error_string()))
+        .collect::<Result<Vec<_>, _>>()?;
 
     if images.is_empty() {
         warn!(source = %source, "no supported images found");
@@ -143,6 +159,7 @@ fn image_from_path(app: &tauri::AppHandle, path: PathBuf) -> Result<AppImage, Ap
         name,
         size_bytes: Some(metadata.len()),
         preview_path: Some(preview_path),
+        preview_data_url: None,
     })
 }
 

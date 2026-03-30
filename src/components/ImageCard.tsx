@@ -1,4 +1,5 @@
 import { memo, type DragEvent } from "react";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import type { AppImage } from "../types";
 
 type ImageCardProps = {
@@ -40,6 +41,8 @@ export const ImageCard = memo(function ImageCard({
   onMoveDown,
   onRemove
 }: ImageCardProps) {
+  const previewSrc = image.previewPath ? convertFileSrc(image.previewPath) : image.previewDataUrl ?? "";
+
   return (
     <article
       className={`imageCard ${isDragging ? "isDragging" : ""}`}
@@ -50,9 +53,9 @@ export const ImageCard = memo(function ImageCard({
       onDrop={onDrop}
       onDragEnd={onDragEnd}
       aria-grabbed={isDragging}
-    >
+      >
       <div className="thumb">
-        <img src={toFileUrl(image.previewPath)} alt={image.name} loading="lazy" />
+        <img src={previewSrc} alt={image.name} loading="lazy" decoding="async" />
       </div>
       <button type="button" className="dragHandle" draggable={false} aria-label={`Drag ${image.name}`}>
         ↔ Drag
@@ -94,12 +97,3 @@ export const ImageCard = memo(function ImageCard({
     </article>
   );
 });
-
-function toFileUrl(path?: string) {
-  if (!path) {
-    return "";
-  }
-
-  const normalized = path.replace(/\\/g, "/");
-  return normalized.startsWith("/") ? `file://${normalized}` : `file:///${normalized}`;
-}

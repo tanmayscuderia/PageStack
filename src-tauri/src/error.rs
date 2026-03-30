@@ -23,6 +23,8 @@ pub enum AppError {
     CreatePreviewDirectory { detail: String },
     #[error("failed to write preview thumbnail: {detail}")]
     WritePreview { detail: String },
+    #[error("failed to read preview thumbnail: {detail}")]
+    ReadPreview { detail: String },
     #[error("{path}: invalid file")]
     InvalidFile { path: String },
     #[error("too many images selected ({count} items, max {limit})")]
@@ -45,6 +47,7 @@ impl AppError {
             AppError::FileTooLarge { .. } => "FILE_TOO_LARGE",
             AppError::CreatePreviewDirectory { .. } => "CREATE_PREVIEW_DIRECTORY",
             AppError::WritePreview { .. } => "WRITE_PREVIEW",
+            AppError::ReadPreview { .. } => "READ_PREVIEW",
             AppError::InvalidFile { .. } => "INVALID_FILE",
             AppError::TooManyImages { .. } => "TOO_MANY_IMAGES",
             AppError::DecodeImage { .. } => "DECODE_IMAGE",

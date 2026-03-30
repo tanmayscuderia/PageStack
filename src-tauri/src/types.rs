@@ -7,6 +7,7 @@ pub struct AppImage {
     pub name: String,
     pub size_bytes: Option<u64>,
     pub preview_path: Option<String>,
+    pub preview_data_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
